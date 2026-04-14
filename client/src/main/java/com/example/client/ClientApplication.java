@@ -1,13 +1,12 @@
 package com.example.client;
 
-import com.example.client.grpc.GreetingRequest;
-import com.example.client.grpc.GreetingServiceGrpc;
+import com.example.service.grpc.GreetingRequest;
+import com.example.service.grpc.GreetingsGrpc;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.grpc.client.ChannelBuilderOptions;
-import org.springframework.grpc.client.GrpcChannelFactory;
+import org.springframework.grpc.client.GrpcChannelBuilderCustomizer;
+import org.springframework.grpc.client.ImportGrpcClients;
 import org.springframework.grpc.client.interceptor.security.BearerTokenAuthenticationInterceptor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.context.SecurityContextHolderStrategy;
@@ -18,10 +17,9 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
+@ImportGrpcClients(basePackageClasses = GreetingsGrpc.class, target = "localhost:9090")
 @SpringBootApplication
 public class ClientApplication {
 
@@ -29,11 +27,16 @@ public class ClientApplication {
         SpringApplication.run(ClientApplication.class, args);
     }
 
-    private final SecurityContextHolderStrategy strategy =
-            SecurityContextHolder.getContextHolderStrategy();
+    private final SecurityContextHolderStrategy strategy = SecurityContextHolder
+            .getContextHolderStrategy();
 
+    @Bean
+    GrpcChannelBuilderCustomizer<?> grpcChannelBuilderCustomizer(OAuth2AuthorizedClientManager authorizedClientManager) {
+        return GrpcChannelBuilderCustomizer
+                .matching("localhost:9090", builder -> builder.intercept(
+                        new BearerTokenAuthenticationInterceptor(() -> this.token(authorizedClientManager))));
+    }
 
-    // todo
     String token(OAuth2AuthorizedClientManager authorizedClientManager) {
         var authenticatedUser = this.strategy.getContext().getAuthentication();
         if (authenticatedUser instanceof OAuth2AuthenticationToken auth2AuthenticationToken) {
@@ -47,41 +50,24 @@ public class ClientApplication {
         }
         return null;
     }
-
-    @Bean
-    @Lazy
-    GreetingServiceGrpc.GreetingServiceBlockingStub greetingServiceBlockingStub(
-            GrpcChannelFactory channels,
-            OAuth2AuthorizedClientManager authorizedClientManager
-    ) {
-        var bearerTokenInterceptor = new BearerTokenAuthenticationInterceptor(() -> Objects.requireNonNull(
-                this.token(authorizedClientManager)));
-        var options = ChannelBuilderOptions
-                .defaults()
-                .withInterceptors(List.of(bearerTokenInterceptor));
-        var channel = channels.createChannel("localhost:9090", options);
-        return GreetingServiceGrpc.newBlockingStub(channel);
-    }
 }
 
 @Controller
 @ResponseBody
-class GreetingClient {
+class GrpcClientController {
 
-    private final GreetingServiceGrpc.GreetingServiceBlockingStub client;
+    private final GreetingsGrpc.GreetingsBlockingStub stub;
 
-    GreetingClient(GreetingServiceGrpc.GreetingServiceBlockingStub client) {
-        this.client = client;
+    GrpcClientController(GreetingsGrpc.GreetingsBlockingStub stub) {
+        this.stub = stub;
     }
 
     @GetMapping("/")
-    Map<String, String> message() {
-        var request = GreetingRequest
-                .newBuilder()
-                .setName("Spring fans")
-                .build();
-        var msg = this.client.greet(request);
-        return Map.of("message", msg.getMessage());
+    String greet() {
+        return this.stub.hello(GreetingRequest
+                        .newBuilder()
+                        .setName("World")
+                        .build())
+                .getMessage();
     }
-
 }
